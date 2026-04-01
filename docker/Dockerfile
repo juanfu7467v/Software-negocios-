@@ -1,152 +1,118 @@
-# pre-build stage
-FROM node:24-alpine as node
+# Stage 1: Node.js assets & binaries
+FROM node:24-alpine AS node_image
+
+# Stage 2: Builder
 FROM ruby:3.4.4-alpine3.21 AS pre-builder
 
+# Arguments & Environment
 ARG NODE_VERSION="24.13.0"
 ARG PNPM_VERSION="10.2.0"
-ENV NODE_VERSION=${NODE_VERSION}
-ENV PNPM_VERSION=${PNPM_VERSION}
-
-# ARG default to production settings
-# For development docker-compose file overrides ARGS
 ARG BUNDLE_WITHOUT="development:test"
-ENV BUNDLE_WITHOUT ${BUNDLE_WITHOUT}
-ENV BUNDLER_VERSION=2.5.16
-
 ARG RAILS_SERVE_STATIC_FILES=true
-ENV RAILS_SERVE_STATIC_FILES ${RAILS_SERVE_STATIC_FILES}
-
 ARG RAILS_ENV=production
-ENV RAILS_ENV ${RAILS_ENV}
-
 ARG NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider"
-ENV NODE_OPTIONS ${NODE_OPTIONS}
 
-ENV BUNDLE_PATH="/gems"
+ENV RAILS_ENV=${RAILS_ENV} \
+    BUNDLE_WITHOUT=${BUNDLE_WITHOUT} \
+    BUNDLE_PATH="/gems" \
+    BUNDLE_FORCE_RUBY_PLATFORM=1 \
+    BUNDLER_VERSION=2.5.16 \
+    RAILS_SERVE_STATIC_FILES=${RAILS_SERVE_STATIC_FILES} \
+    NODE_OPTIONS=${NODE_OPTIONS} \
+    PNPM_HOME="/root/.local/share/pnpm" \
+    PATH="/root/.local/share/pnpm:/usr/local/bin:$PATH"
 
+# Install system dependencies for building
 RUN apk update && apk add --no-cache \
-  openssl \
-  tar \
-  build-base \
-  tzdata \
-  postgresql-dev \
-  postgresql-client \
-  git \
-  curl \
-  xz \
-  && mkdir -p /var/app \
-  && gem install bundler -v "$BUNDLER_VERSION"
+    build-base \
+    postgresql-dev \
+    postgresql-client \
+    tzdata \
+    git \
+    curl \
+    libxml2-dev \
+    libxslt-dev \
+    vips-dev \
+    shared-mime-info \
+    xz \
+    openssl \
+    && gem install bundler -v "$BUNDLER_VERSION"
 
-COPY --from=node /usr/local/bin/node /usr/local/bin/
-COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+# Copy Node & NPM from node stage
+COPY --from=node_image /usr/local/bin/node /usr/local/bin/
+COPY --from=node_image /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-  && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
-
-RUN npm install -g pnpm@${PNPM_VERSION}
-
-RUN echo 'export PNPM_HOME="/root/.local/share/pnpm"' >> /root/.shrc \
-  && echo 'export PATH="$PNPM_HOME:$PATH"' >> /root/.shrc \
-  && export PNPM_HOME="/root/.local/share/pnpm" \
-  && export PATH="$PNPM_HOME:$PATH" \
-  && pnpm --version
-
-# Persist the environment variables in Docker
-ENV PNPM_HOME="/root/.local/share/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && npm install -g pnpm@${PNPM_VERSION}
 
 WORKDIR /app
 
+# Install Ruby Gems
 COPY Gemfile Gemfile.lock ./
+RUN bundle config set --local force_ruby_platform true && \
+    if [ "$RAILS_ENV" = "production" ]; then \
+      bundle config set without 'development test' && \
+      bundle install -j $(nproc) -r 3; \
+    else \
+      bundle install -j $(nproc) -r 3; \
+    fi
 
-# natively compile grpc and protobuf to support alpine musl (dialogflow-docker workflow)
-# https://github.com/googleapis/google-cloud-ruby/issues/13306
-# adding xz as nokogiri was failing to build libxml
-# https://github.com/chatwoot/chatwoot/issues/4045
-RUN apk update && apk add --no-cache build-base musl ruby-full ruby-dev gcc make musl-dev openssl openssl-dev g++ linux-headers xz vips
-RUN bundle config set --local force_ruby_platform true
-
-# Do not install development or test gems in production
-RUN if [ "$RAILS_ENV" = "production" ]; then \
-  bundle config set without 'development test'; bundle install -j 4 -r 3; \
-  else bundle install -j 4 -r 3; \
-  fi
-
+# Install JS dependencies
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm i
+RUN pnpm install --frozen-lockfile
 
-COPY . /app
+# Copy application code
+COPY . .
 
-# creating a log directory so that image wont fail when RAILS_LOG_TO_STDOUT is false
-# https://github.com/chatwoot/chatwoot/issues/701
-RUN mkdir -p /app/log
-
-# generate production assets if production environment
+# Precompile assets
 RUN if [ "$RAILS_ENV" = "production" ]; then \
-  SECRET_KEY_BASE=precompile_placeholder RAILS_LOG_TO_STDOUT=enabled bundle exec rake assets:precompile \
-  && rm -rf spec node_modules tmp/cache; \
-  fi
+    SECRET_KEY_BASE=precompile_placeholder \
+    RAILS_LOG_TO_STDOUT=enabled \
+    bundle exec rake assets:precompile && \
+    rm -rf spec node_modules tmp/cache; \
+    fi
 
-# Generate .git_sha file with current commit hash
-RUN git rev-parse HEAD > /app/.git_sha
+# Final cleanup of builder stage
+RUN git rev-parse HEAD > /app/.git_sha && \
+    rm -rf .git .gitignore /gems/ruby/3.4.0/cache/*.gem && \
+    find /gems/ruby/3.4.0/gems/ \( -name "*.c" -o -name "*.o" \) -delete
 
-# Remove unnecessary files
-RUN rm -rf /gems/ruby/3.4.0/cache/*.gem \
-  && find /gems/ruby/3.4.0/gems/ \( -name "*.c" -o -name "*.o" \) -delete \
-  && rm -rf .git \
-  && rm .gitignore
-
-# final build stage
+# Stage 3: Final Production Image
 FROM ruby:3.4.4-alpine3.21
 
-ARG NODE_VERSION="24.13.0"
-ARG PNPM_VERSION="10.2.0"
-ENV NODE_VERSION=${NODE_VERSION}
-ENV PNPM_VERSION=${PNPM_VERSION}
-
-ARG BUNDLE_WITHOUT="development:test"
-ENV BUNDLE_WITHOUT ${BUNDLE_WITHOUT}
-ENV BUNDLER_VERSION=2.5.16
-
-ARG EXECJS_RUNTIME="Disabled"
-ENV EXECJS_RUNTIME ${EXECJS_RUNTIME}
-
-ARG RAILS_SERVE_STATIC_FILES=true
-ENV RAILS_SERVE_STATIC_FILES ${RAILS_SERVE_STATIC_FILES}
-
-ARG BUNDLE_FORCE_RUBY_PLATFORM=1
-ENV BUNDLE_FORCE_RUBY_PLATFORM ${BUNDLE_FORCE_RUBY_PLATFORM}
-
 ARG RAILS_ENV=production
-ENV RAILS_ENV ${RAILS_ENV}
-ENV BUNDLE_PATH="/gems"
+ENV RAILS_ENV=${RAILS_ENV} \
+    BUNDLE_PATH="/gems" \
+    BUNDLE_FORCE_RUBY_PLATFORM=1 \
+    RAILS_SERVE_STATIC_FILES=true \
+    RAILS_LOG_TO_STDOUT=enabled
 
+# Install minimal runtime dependencies
 RUN apk update && apk add --no-cache \
-  build-base \
-  openssl \
-  tzdata \
-  postgresql-client \
-  imagemagick \
-  git \
-  vips \
-  && gem install bundler -v "$BUNDLER_VERSION"
+    postgresql-client \
+    tzdata \
+    vips \
+    imagemagick \
+    ca-certificates \
+    openssl
 
-COPY --from=node /usr/local/bin/node /usr/local/bin/
-COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+# Copy binaries and library from node stage (required if apps uses ExecJS or tools like MJML)
+COPY --from=node_image /usr/local/bin/node /usr/local/bin/
+COPY --from=node_image /usr/local/lib/node_modules /usr/local/lib/node_modules
 
-RUN if [ "$RAILS_ENV" != "production" ]; then \
-  apk add --no-cache curl \
-  && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-  && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-  && npm install -g pnpm@${PNPM_VERSION} \
-  && pnpm --version; \
-  fi
-
+# Copy gems and app from builder
 COPY --from=pre-builder /gems/ /gems/
 COPY --from=pre-builder /app /app
 
-# Copy .git_sha file from pre-builder stage
-COPY --from=pre-builder /app/.git_sha /app/.git_sha
-
 WORKDIR /app
 
+# Ensure log directory exists
+RUN mkdir -p /app/log
+
 EXPOSE 3000
+
+# Metadata
+LABEL maintainer="Developer"
+LABEL version="1.0"
+
+CMD ["bundle", "exec", "rails", "server", "-b", "0.0.0.0"]
