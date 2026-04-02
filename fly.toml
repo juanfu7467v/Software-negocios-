@@ -15,6 +15,12 @@ primary_region = "iad"
   min_machines_running = 1
   processes = ["app"]
 
+[env]
+  PORT = "3000"
+  RAILS_ENV = "production"
+  RAILS_SERVE_STATIC_FILES = "true"
+  RAILS_LOG_TO_STDOUT = "true"
+
 [[services]]
   internal_port = 3000
   processes = ["app"]
@@ -31,12 +37,15 @@ primary_region = "iad"
     handlers = ["tls", "http"]
     port = 443
 
-  [[services.tcp_checks]]
-    interval = "15s"
-    timeout = "2s"
-    grace_period = "1s"
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "get"
+    path = "/health"
+    protocol = "http"
     restart_limit = 0
 
 [processes]
-  app = "bundle exec rails ip_lookup:setup && bin/rails server -p $PORT -e $RAILS_ENV"
+  app = "bundle exec rails ip_lookup:setup && bundle exec rails server -b 0.0.0.0 -p 3000"
   worker = "bundle exec rails ip_lookup:setup && bundle exec sidekiq -C config/sidekiq.yml"

@@ -63,5 +63,9 @@ FROM base AS final
 COPY --from=build /usr/local/bundle /usr/local/bundle
 COPY --from=build /rails /rails
 
+# Ensure the application has permissions to write to tmp and log
+RUN mkdir -p tmp/pids log && \
+    chmod -R 777 tmp log
+
 # Run the application
-CMD ["bundle", "exec", "puma", "-C", "config/puma.rb"]
+CMD ["bundle", "exec", "rails", "server", "-b", "0.0.0.0", "-p", "3000"]
