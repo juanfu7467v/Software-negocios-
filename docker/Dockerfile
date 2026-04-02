@@ -1,9 +1,14 @@
 # syntax = docker/dockerfile:1
 
-# 1. Etapa base con la versión de Ruby de tus logs
+# 1. Etapa base
 FROM ruby:3.4.4-slim AS base
 
 WORKDIR /rails
+
+# Instalación de dependencias básicas y actualización de Bundler
+RUN apt-get update -qq && \
+    apt-get install --no-install-recommends -y curl libjemalloc2 libvips postgresql-client && \
+    rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 # Configuración de producción
 ENV RAILS_ENV="production" \
@@ -12,9 +17,9 @@ ENV RAILS_ENV="production" \
     BUNDLE_WITHOUT="development test"
 
 # 2. Etapa de construcción (Build)
-# Aquí instalamos las dependencias necesarias para compilar gemas (build-essential, git, etc.)
 FROM base AS build
 
+# Dependencias para compilar gemas y assets
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y \
     build-essential \
@@ -24,9 +29,10 @@ RUN apt-get update -qq && \
     curl \
     libvips \
     node-gyp \
-    python-is-python3
+    python-is-python3 \
+    unzip
 
-# Instalación de Node.js y Yarn (necesarios para assets)
+# Instalación de Node.js y Yarn
 ARG NODE_VERSION=20.11.1
 ARG YARN_VERSION=1.22.19
 ENV PATH=/usr/local/node/bin:$PATH
@@ -49,20 +55,11 @@ RUN if [ -f bin/rails ]; then \
 # 3. Etapa final (Runner)
 FROM base
 
-# Instalación de dependencias de tiempo de ejecución únicamente
-RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y \
-    curl \
-    libjemalloc2 \
-    libvips \
-    postgresql-client && \
-    rm -rf /var/lib/apt/lists /var/cache/apt/archives
-
-# Copiar gemas y artefactos construidos
+# Copiar gemas y artefactos construidos desde la etapa 'build'
 COPY --from=build /usr/local/bundle /usr/local/bundle
 COPY --from=build /rails /rails
 
-# Usuario no-root por seguridad
+# Configuración de seguridad: Usuario no-root
 RUN useradd rails --create-home --shell /bin/bash && \
     chown -R rails:rails db log storage tmp
 USER rails:rails
