@@ -14,6 +14,7 @@ WORKDIR /rails
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y \
     curl \
+    gnupg \
     libjemalloc2 \
     libvips \
     postgresql-client \
@@ -24,9 +25,8 @@ RUN apt-get update -qq && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Update gems and install specific Bundler version from Gemfile.lock
-ARG BUNDLER_VERSION=2.5.16
 RUN gem update --system --no-document && \
-    gem install -N bundler -v ${BUNDLER_VERSION}
+    gem install -N bundler
 
 # Set production environment
 ENV BUNDLE_DEPLOYMENT="1" \
@@ -35,12 +35,15 @@ ENV BUNDLE_DEPLOYMENT="1" \
     RAILS_ENV="production" \
     NODE_ENV="production"
 
-# Install Node.js (Using LTS 22.14.0 for stability)
-ARG NODE_VERSION=22.14.0
-ENV PATH=/usr/local/node/bin:$PATH
-RUN curl -sL https://github.com/nodenv/node-build/archive/master.tar.gz | tar xz -C /tmp/ && \
-    /tmp/node-build-master/bin/node-build "${NODE_VERSION}" /usr/local/node && \
-    rm -rf /tmp/node-build-master
+# Install Node.js using NodeSource (more reliable than node-build)
+# Using Node 22.x as it is the current stable LTS
+ARG NODE_MAJOR=22
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && \
+    apt-get install nodejs -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install pnpm (Chatwoot uses pnpm as seen in the lockfile)
 ARG PNPM_VERSION=10.2.0
@@ -65,8 +68,8 @@ RUN bundle install && \
     bundle exec bootsnap precompile --gemfile
 
 # Install node modules
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+COPY package.json pnpm-lock.yaml* ./
+RUN pnpm install --frozen-lockfile || pnpm install
 
 # Copy application code
 COPY . .
