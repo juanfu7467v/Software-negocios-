@@ -5,7 +5,15 @@ primary_region = "iad"
   dockerfile = "fly.Dockerfile"
 
 [deploy]
+  # Release command for migrations and preparation
   release_command = "POSTGRES_STATEMENT_TIMEOUT=600s bundle exec rails db:chatwoot_prepare && echo $SOURCE_VERSION > .git_sha"
+
+[env]
+  PORT = "3000"
+  RAILS_ENV = "production"
+  RAILS_SERVE_STATIC_FILES = "true"
+  RAILS_LOG_TO_STDOUT = "true"
+  NODE_ENV = "production"
 
 [http_service]
   internal_port = 3000
@@ -14,12 +22,6 @@ primary_region = "iad"
   auto_start_machines = true
   min_machines_running = 1
   processes = ["app"]
-
-[env]
-  PORT = "3000"
-  RAILS_ENV = "production"
-  RAILS_SERVE_STATIC_FILES = "true"
-  RAILS_LOG_TO_STDOUT = "true"
 
 [[services]]
   internal_port = 3000
@@ -40,7 +42,7 @@ primary_region = "iad"
   [[services.http_checks]]
     interval = "30s"
     timeout = "5s"
-    grace_period = "30s"
+    grace_period = "60s" # Increased grace period for Chatwoot startup
     method = "get"
     path = "/health"
     protocol = "http"
