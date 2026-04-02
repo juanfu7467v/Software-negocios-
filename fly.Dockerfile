@@ -11,7 +11,6 @@ LABEL fly_launch_runtime="rails"
 WORKDIR /rails
 
 # Install base packages needed for the app and nodejs installation
-# Optimized APT command with minimal dependencies and proper cleanup
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y \
     curl \
