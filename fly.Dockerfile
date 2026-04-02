@@ -10,11 +10,8 @@ LABEL fly_launch_runtime="rails"
 # Rails app lives here
 WORKDIR /rails
 
-# Update gems and bundler
-RUN gem update --system --no-document && \
-    gem install -N bundler
-
 # Install base packages needed for the app and nodejs installation
+# Optimized APT command with minimal dependencies and proper cleanup
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y \
     curl \
@@ -24,7 +21,13 @@ RUN apt-get update -qq && \
     build-essential \
     git \
     pkg-config && \
-    rm -rf /var/lib/apt/lists /var/cache/apt/archives
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Update gems and install specific Bundler version from Gemfile.lock
+ARG BUNDLER_VERSION=2.5.16
+RUN gem update --system --no-document && \
+    gem install -N bundler -v ${BUNDLER_VERSION}
 
 # Set production environment
 ENV BUNDLE_DEPLOYMENT="1" \
@@ -53,7 +56,8 @@ RUN apt-get update -qq && \
     libpq-dev \
     libyaml-dev \
     libffi-dev && \
-    rm -rf /var/lib/apt/lists /var/cache/apt/archives
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install application gems
 COPY Gemfile Gemfile.lock ./
@@ -72,7 +76,6 @@ COPY . .
 RUN bundle exec bootsnap precompile app/ lib/
 
 # Precompiling assets for production
-# Using SECRET_KEY_BASE_DUMMY=1 for asset compilation without the real key
 RUN SECRET_KEY_BASE_DUMMY=1 bundle exec rails assets:precompile
 
 # Final stage for app image
