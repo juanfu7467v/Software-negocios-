@@ -1,118 +1,91 @@
-# Stage 1: Node.js assets & binaries
-FROM node:24-alpine AS node_image
+# syntax=docker/dockerfile:1
+# check=error=true
 
-# Stage 2: Builder
-FROM ruby:3.4.4-alpine3.21 AS pre-builder
+# 1. Definir versiones base
+ARG RUBY_VERSION=3.4.4
+ARG NODE_VERSION=22.14.0
+FROM ruby:$RUBY_VERSION-slim AS base
 
-# Arguments & Environment
-ARG NODE_VERSION="24.13.0"
-ARG PNPM_VERSION="10.2.0"
-ARG BUNDLE_WITHOUT="development:test"
-ARG RAILS_SERVE_STATIC_FILES=true
-ARG RAILS_ENV=production
-ARG NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider"
+LABEL fly_launch_runtime="rails"
 
-ENV RAILS_ENV=${RAILS_ENV} \
-    BUNDLE_WITHOUT=${BUNDLE_WITHOUT} \
-    BUNDLE_PATH="/gems" \
-    BUNDLE_FORCE_RUBY_PLATFORM=1 \
-    BUNDLER_VERSION=2.5.16 \
-    RAILS_SERVE_STATIC_FILES=${RAILS_SERVE_STATIC_FILES} \
-    NODE_OPTIONS=${NODE_OPTIONS} \
-    PNPM_HOME="/root/.local/share/pnpm" \
-    PATH="/root/.local/share/pnpm:/usr/local/bin:$PATH"
+WORKDIR /rails
 
-# Install system dependencies for building
-RUN apk update && apk add --no-cache \
-    build-base \
-    postgresql-dev \
-    postgresql-client \
-    tzdata \
-    git \
+# Instalar dependencias base del sistema
+RUN apt-get update -qq && \
+    apt-get install --no-install-recommends -y \
     curl \
-    libxml2-dev \
-    libxslt-dev \
-    vips-dev \
-    shared-mime-info \
-    xz \
-    openssl \
-    && gem install bundler -v "$BUNDLER_VERSION"
+    libjemalloc2 \
+    libvips \
+    postgresql-client \
+    pkg-config \
+    python-is-python3 \
+    && rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
-# Copy Node & NPM from node stage
-COPY --from=node_image /usr/local/bin/node /usr/local/bin/
-COPY --from=node_image /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && npm install -g pnpm@${PNPM_VERSION}
+# Instalar Node.js de forma robusta (usando nodosource)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install --no-install-recommends -y nodejs && \
+    npm install -g pnpm@10.2.0
 
-WORKDIR /app
+# Configurar entorno de Ruby
+ENV BUNDLE_DEPLOYMENT="1" \
+    BUNDLE_PATH="/usr/local/bundle" \
+    BUNDLE_WITHOUT="development:test" \
+    RAILS_ENV="production"
 
-# Install Ruby Gems
+# --- ETAPA DE CONSTRUCCIÓN ---
+FROM base AS build
+
+# Instalar paquetes necesarios para compilar gemas y módulos de node
+RUN apt-get update -qq && \
+    apt-get install --no-install-recommends -y \
+    build-essential \
+    git \
+    libffi-dev \
+    libpq-dev \
+    libyaml-dev \
+    && rm -rf /var/lib/apt/lists /var/cache/apt/archives
+
+# Instalar Gemas de Ruby
 COPY Gemfile Gemfile.lock ./
-RUN bundle config set --local force_ruby_platform true && \
-    if [ "$RAILS_ENV" = "production" ]; then \
-      bundle config set without 'development test' && \
-      bundle install -j $(nproc) -r 3; \
-    else \
-      bundle install -j $(nproc) -r 3; \
-    fi
+RUN bundle install && \
+    rm -rf ~/.bundle/ "${BUNDLE_PATH}"/ruby/*/cache "${BUNDLE_PATH}"/ruby/*/bundler/gems/*/.git
 
-# Install JS dependencies
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+# Instalar dependencias de JavaScript
+COPY package.json pnpm-lock.yaml* ./ 
+# Si no usas pnpm, cambia a: RUN npm install
+RUN pnpm install --frozen-lockfile || npm install
 
-# Copy application code
+# Copiar el resto del código
 COPY . .
 
-# Precompile assets
-RUN if [ "$RAILS_ENV" = "production" ]; then \
-    SECRET_KEY_BASE=precompile_placeholder \
-    RAILS_LOG_TO_STDOUT=enabled \
-    bundle exec rake assets:precompile && \
-    rm -rf spec node_modules tmp/cache; \
-    fi
+# Precompilar bootsnap para mejorar velocidad de inicio
+RUN bundle exec bootsnap precompile --gemfile app/ lib/
 
-# Final cleanup of builder stage
-RUN git rev-parse HEAD > /app/.git_sha && \
-    rm -rf .git .gitignore /gems/ruby/3.4.0/cache/*.gem && \
-    find /gems/ruby/3.4.0/gems/ \( -name "*.c" -o -name "*.o" \) -delete
+# Precompilar activos (Vite / Asset Pipeline)
+# Usamos un Secret Key falso solo para la compilación
+RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile
 
-# Stage 3: Final Production Image
-FROM ruby:3.4.4-alpine3.21
+# --- ETAPA FINAL ---
+FROM base
 
-ARG RAILS_ENV=production
-ENV RAILS_ENV=${RAILS_ENV} \
-    BUNDLE_PATH="/gems" \
-    BUNDLE_FORCE_RUBY_PLATFORM=1 \
-    RAILS_SERVE_STATIC_FILES=true \
-    RAILS_LOG_TO_STDOUT=enabled
+# Instalar runtime específico si falta algo
+RUN apt-get update -qq && \
+    apt-get install --no-install-recommends -y imagemagick && \
+    rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
-# Install minimal runtime dependencies
-RUN apk update && apk add --no-cache \
-    postgresql-client \
-    tzdata \
-    vips \
-    imagemagick \
-    ca-certificates \
-    openssl
+# Copiar artefactos construidos
+COPY --from=build "${BUNDLE_PATH}" "${BUNDLE_PATH}"
+COPY --from=build /rails /rails
 
-# Copy binaries and library from node stage (required if apps uses ExecJS or tools like MJML)
-COPY --from=node_image /usr/local/bin/node /usr/local/bin/
-COPY --from=node_image /usr/local/lib/node_modules /usr/local/lib/node_modules
+# Configurar usuario de ejecución por seguridad
+RUN groupadd --system --gid 1000 rails && \
+    useradd rails --uid 1000 --gid 1000 --create-home --shell /bin/bash && \
+    chown -R 1000:1000 db log tmp
+USER 1000:1000
 
-# Copy gems and app from builder
-COPY --from=pre-builder /gems/ /gems/
-COPY --from=pre-builder /app /app
+# Entrada al contenedor
+ENTRYPOINT ["/rails/bin/docker-entrypoint"]
 
-WORKDIR /app
-
-# Ensure log directory exists
-RUN mkdir -p /app/log
-
+# Exponer puerto y comando de inicio
 EXPOSE 3000
-
-# Metadata
-LABEL maintainer="Developer"
-LABEL version="1.0"
-
-CMD ["bundle", "exec", "rails", "server", "-b", "0.0.0.0"]
+CMD ["./bin/rails", "server", "-b", "0.0.0.0"]
