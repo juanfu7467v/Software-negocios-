@@ -14,7 +14,7 @@ WORKDIR /rails
 RUN gem update --system --no-document && \
     gem install -N bundler
 
-# Install base packages needed to install nodejs
+# Install base packages needed to install nodejs and other dependencies
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y curl gnupg libjemalloc2 libvips postgresql-client && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
@@ -25,9 +25,8 @@ ENV BUNDLE_DEPLOYMENT="1" \
     BUNDLE_WITHOUT="development:test" \
     RAILS_ENV="production"
 
-# Install Node.js using NodeSource (more reliable than node-build for major versions)
-# We use Node 22 as it is the current stable LTS. 
-# If Node 24 is strictly required, NodeSource supports it as well.
+# Install Node.js using NodeSource (more reliable than node-build)
+# Using Node 22.x (LTS) for stability and compatibility
 ARG NODE_MAJOR=22
 RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
@@ -36,7 +35,7 @@ RUN mkdir -p /etc/apt/keyrings && \
     apt-get install nodejs -y && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
-# Install pnpm as requested by package.json
+# Install pnpm (Chatwoot uses pnpm as seen in the lockfile)
 RUN npm install -g pnpm@10.2.0
 
 # Throw-away build stage to reduce size of final image
