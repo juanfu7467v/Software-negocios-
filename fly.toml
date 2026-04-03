@@ -6,7 +6,7 @@ primary_region = "iad"
 
 [deploy]
   # Release command for migrations and preparation
-  release_command = "POSTGRES_STATEMENT_TIMEOUT=600s bundle exec rails db:chatwoot_prepare && echo $SOURCE_VERSION > .git_sha"
+  release_command = "bundle exec rails db:prepare"
 
 [env]
   PORT = "3000"
