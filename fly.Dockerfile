@@ -55,7 +55,7 @@ RUN bundle install && \
 
 # Install node modules
 COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile || pnpm install
+RUN pnpm install --no-frozen-lockfile
 
 # Copy application code
 COPY . .
@@ -64,7 +64,7 @@ COPY . .
 RUN bundle exec bootsnap precompile app/ lib/
 
 # Precompiling assets for production without requiring secret RAILS_MASTER_KEY
-RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile
+RUN SECRET_KEY_BASE_DUMMY=1 RAILS_ASSETS_PRECOMPILE=1 RAILS_ENV=production ./bin/rails assets:precompile
 
 
 # Final stage for app image
