@@ -6,7 +6,7 @@ primary_region = "iad"
 
 [deploy]
   # Release command for migrations and preparation
-  release_command = "bundle exec rails db:prepare"
+  release_command = "bundle exec rails db:migrate"
 
 [env]
   PORT = "3000"
@@ -49,5 +49,5 @@ primary_region = "iad"
     restart_limit = 0
 
 [processes]
-  app = "bundle exec rails ip_lookup:setup && bundle exec rails server -b 0.0.0.0 -p 3000"
+  app = "bundle exec rails db:prepare && bundle exec rails ip_lookup:setup && bundle exec rails server -b 0.0.0.0 -p 3000"
   worker = "bundle exec rails ip_lookup:setup && bundle exec sidekiq -C config/sidekiq.yml"
