@@ -81,6 +81,9 @@ module Chatwoot
       config.active_record.encryption.extend_queries = true
       # Store a per-row key reference to support future key rotation
       config.active_record.encryption.store_key_references = true
+
+    # Disable Vite Ruby compatibility check
+    config.vite_ruby.skip_compatibility_check = true
     end
   end
 
