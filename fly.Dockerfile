@@ -5,6 +5,8 @@
 ARG RUBY_VERSION=3.4.4
 FROM ruby:$RUBY_VERSION-slim AS base
 
+ENV VITE_RUBY_SKIP_COMPATIBILITY_CHECK="true"
+
 LABEL fly_launch_runtime="rails"
 
 # Rails app lives here
