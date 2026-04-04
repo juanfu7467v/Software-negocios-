@@ -27,9 +27,10 @@ ENV BUNDLE_DEPLOYMENT="1" \
 
 # Install Node.js using NodeSource (more reliable than node-build)
 # Using Node 22.x (LTS) for stability and compatibility
-ARG NODE_MAJOR=22
+ARG NODE_VERSION=22.14.0
 RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+    NODE_MAJOR=$(echo $NODE_VERSION | cut -d. -f1) && \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
     apt-get update && \
     apt-get install nodejs -y && \
@@ -63,7 +64,8 @@ COPY . .
 RUN bundle exec bootsnap precompile app/ lib/
 
 # Precompiling assets for production without requiring secret RAILS_MASTER_KEY
-RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile
+ARG SECRET_KEY_BASE_DUMMY=1
+RUN SECRET_KEY_BASE_DUMMY=1 RAILS_ENV=production bundle exec rails assets:precompile
 
 
 # Final stage for app image
