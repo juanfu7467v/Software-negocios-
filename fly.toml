@@ -2,6 +2,8 @@ app = "software-negocios-"
 primary_region = "iad"
 
 [build]
+
+
   dockerfile = "fly.Dockerfile"
 
 [deploy]
