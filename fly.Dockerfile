@@ -37,7 +37,7 @@ RUN mkdir -p /etc/apt/keyrings && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 # Install pnpm (Chatwoot uses pnpm as seen in the lockfile)
-RUN npm install -g pnpm@10.2.0
+RUN npm install -g pnpm@10.4.1
 
 # Throw-away build stage to reduce size of final image
 FROM base AS build
@@ -64,7 +64,8 @@ COPY . .
 RUN bundle exec bootsnap precompile app/ lib/
 
 # Precompiling assets for production without requiring secret RAILS_MASTER_KEY or DB connection
-RUN SECRET_KEY_BASE_DUMMY=1 RAILS_ENV=production DATABASE_URL=postgresql://dummy:dummy@localhost/dummy bundle exec rails assets:precompile
+# Skip Vite compatibility check during build to avoid failures
+RUN VITE_RUBY_SKIP_COMPATIBILITY_CHECK=true SECRET_KEY_BASE_DUMMY=1 RAILS_ENV=production DATABASE_URL=postgresql://dummy:dummy@localhost/dummy bundle exec rails assets:precompile
 
 
 # Final stage for app image

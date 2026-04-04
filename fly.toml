@@ -3,6 +3,8 @@ primary_region = "iad"
 
 [build]
   dockerfile = "fly.Dockerfile"
+  ignore_bundle_config = true
+  ignore_node_modules = true
 
 [deploy]
   # Release command for migrations and preparation
