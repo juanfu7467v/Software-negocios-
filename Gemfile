@@ -272,3 +272,5 @@ group :development, :test do
   gem 'spring'
   gem 'spring-watcher-listen'
 end
+
+gem "dockerfile-rails", ">= 1.7", group: :development
